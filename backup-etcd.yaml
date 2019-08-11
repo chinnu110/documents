@@ -1,0 +1,97 @@
+---
+- name: Backup OpenShift ETCD Configuration
+  hosts: etcd
+  vars:
+    backup_dir: "/tmp/etcd-{{ ansible_hostname }}-{{ ansible_date_time.date }}/"
+    backup_arch: "/tmp/etcd-{{ ansible_hostname }}-{{ ansible_date_time.date }}.tar.gz"
+
+  tasks:
+  - name: display backup directory
+    debug:
+      msg: "Backup Directory: {{ backup_dir }}"
+
+  - name: display backup archive
+    debug:
+      msg: "Backup Archive: {{ backup_arch }}"
+
+  - name: Remove backup directory if it exists
+    file:
+      path: "{{ backup_dir }}"
+      state: absent
+
+  - name: Remove backup archive if it exists
+    file:
+      path: "{{ backup_arch }}"
+      state: absent
+
+  - name: Create temporary backup directory
+    file:
+      path: "{{ backup_dir }}"
+      state: directory
+
+  - name: Copy /etc/etcd contents
+    synchronize:
+      src: "/etc/etcd"
+      dest: "{{ backup_dir }}"
+      archive: yes
+    delegate_to: "{{ inventory_hostname }}"
+
+- name: Backup OpenShift ETCD Data
+  hosts: etcd[0]
+  vars:
+    backup_dir: "/tmp/etcd-{{ ansible_hostname }}-{{ ansible_date_time.date }}/"
+    backup_arch: "/tmp/etcd-{{ ansible_hostname }}-{{ ansible_date_time.date }}.tar.gz"
+
+  tasks:
+  - name: Define list of peers
+    set_fact:
+      etcd_peers: "https://{{ hostvars[groups['etcd'][0]]['ansible_fqdn'] }}:2379,https://{{ hostvars[groups['etcd'][1]]['ansible_fqdn'] }}:2379,https://{{ hostvars[groups['etcd'][2]]['ansible_fqdn'] }}:2379"
+
+  - name: etcd Peer List
+    debug:
+      msg: "{{ etcd_peers }}"
+
+  - name: Verify ETCD Health
+    shell: "etcdctl --cert-file=/etc/etcd/peer.crt --key-file=/etc/etcd/peer.key --ca-file=/etc/etcd/ca.crt --peers=\"{{ etcd_peers }}\" cluster-health"
+    register: etcd_health
+    changed_when: etcd_health.rc > 10
+    failed_when: etcd_health.rc != 0 or "cluster is healthy" not in etcd_health.stdout
+
+  - name: ETCD cluster health
+    debug:
+      msg: "ETCD Cluster Health: {{ etcd_health.stdout }}"
+
+  - name: Create etcd backup
+    shell: "etcdctl backup --data-dir /var/lib/etcd --backup-dir {{ backup_dir }}"
+
+
+# Archive etcd content and send to masters[0]
+- name: Backup OpenShift ETCD Configuration
+  hosts: etcd
+  vars:
+    backup_dir: "/tmp/etcd-{{ ansible_hostname }}-{{ ansible_date_time.date }}/"
+    backup_arch: "/tmp/etcd-{{ ansible_hostname }}-{{ ansible_date_time.date }}.tar.gz"
+    backup_collection_dir: "/tmp/openshift-backup-{{ ansible_date_time.date }}/"
+
+  tasks:
+  - name: Compress backup directory
+    archive:
+      path: "{{ backup_dir }}"
+      dest: "{{ backup_arch }}"
+      remove: no
+
+  - name: Remove backup directory after archive creation
+    file:
+      path: "{{ backup_dir }}"
+      state: absent
+
+  - name: Move all host config backups to first Master
+    fetch:
+      src: "{{ backup_arch }}"
+      dest: "{{ backup_collection_dir }}"
+      flat: yes
+
+  - name: Remove backup archive from each host after copied to masters[0]
+    file:
+      path: "{{ backup_arch }}"
+      state: absent

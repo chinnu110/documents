@@ -1,0 +1,190 @@
+---
+# Set up location on masters[0] for storing all the backups from all hosts
+- name: Create Collected Backup Location
+  hosts: masters[0]
+  vars:
+    backup_collection_dir: "/tmp/openshift-backup-{{ ansible_date_time.date }}/"
+
+  tasks:
+  - name: display backup directory
+    debug:
+      msg: "Backup Directory: {{ backup_collection_dir }}"
+
+  - name: Remove backup directory if it exists
+    file:
+      path: "{{ backup_collection_dir }}"
+      state: absent
+
+  - name: Create temporary backup directory
+    file:
+      path: "{{ backup_collection_dir }}"
+      state: directory
+      mode: '0755'
+
+
+# Set up location on each host to hold its backup data
+# Generate list of all packages installed on each host
+- name: Set up backup locations on each host
+  hosts: all
+  vars:
+    backup_dir: "/tmp/{{ ansible_hostname }}-{{ ansible_date_time.date }}/"
+    backup_arch: "/tmp/{{ ansible_hostname }}-{{ ansible_date_time.date }}.tar.gz"
+    backup_collection_dir: "/tmp/openshift-backup-{{ ansible_date_time.date }}/"
+
+  tasks:
+  - name: display backup directory
+    debug:
+      msg: "Backup Directory: {{ backup_dir }}"
+
+  - name: display backup archive
+    debug:
+      msg: "Backup Archive: {{ backup_arch }}"
+
+  - name: Remove backup directory if it exists
+    file:
+      path: "{{ backup_dir }}"
+      state: absent
+
+  - name: Remove backup archive if it exists
+    file:
+      path: "{{ backup_arch }}"
+      state: absent
+
+  - name: Create temporary backup directory
+    file:
+      path: "{{ backup_dir }}"
+      state: directory
+      mode: '0755'
+
+  - name: Retrieve list of installed packages
+    yum:
+      list=installed
+    register: yum_list
+
+  - name: Write YUM package list to file
+    copy:
+      content: "{{ yum_list }}"
+      dest: "{{ backup_dir }}/packages.txt"
+
+
+# Backup content on each host
+- name: Backup OpenShift
+  hosts: all,!lb
+  vars:
+    backup_dir: "/tmp/{{ ansible_hostname }}-{{ ansible_date_time.date }}/"
+
+  tasks:
+  - name: Create directory for sysconfigs
+    file:
+      path: "{{ backup_dir }}/etc/sysconfig"
+      state: directory
+      mode: '0755'
+
+  - name: Create directory for anchor certs
+    file:
+      path: "{{ backup_dir }}etc/pki/ca-trust/source/anchors"
+      state: directory
+      mode: '0755'
+
+  - name: Copy /etc/sysconfig contents
+    synchronize:
+      src: "{{ item }}"
+      dest: "{{ backup_dir }}etc"
+      archive: yes
+    with_fileglob:
+      - "/etc/sysconfig/iptables"
+      - "/etc/sysconfig/docker-*"
+      - "/etc/sysconfig/flanneld"
+      - "/etc/sysconfig/atomic*"
+    delegate_to: "{{ inventory_hostname }}"
+
+  - name: Copy anchor certs
+    synchronize:
+      src: "/etc/pki/ca-trust/source/anchors"
+      dest: "{{ backup_dir }}etc/pki/ca-trust/source"
+      archive: yes
+    delegate_to: "{{ inventory_hostname }}"
+
+  - name: Copy DNSmasq config file
+    copy:
+      src: "/etc/dnsmasq.conf"
+      dest: "{{ backup_dir }}etc"
+      remote_src: yes
+
+  - name: Copy DNSmasq config directory
+    synchronize:
+      src: "/etc/dnsmasq.d"
+      dest: "{{ backup_dir }}etc"
+      archive: yes
+    delegate_to: "{{ inventory_hostname }}"
+
+  - name: Copy /etc/cni contents
+    synchronize:
+      src: "/etc/cni"
+      dest: "{{ backup_dir }}etc"
+      archive: yes
+    delegate_to: "{{ inventory_hostname }}"
+
+  - name: Copy /etc/origin contents
+    synchronize:
+      src: "/etc/origin"
+      dest: "{{ backup_dir }}etc"
+      archive: yes
+    delegate_to: "{{ inventory_hostname }}"
+
+
+# Back up load balancer config
+- name: Get Load Balancer config
+  hosts: lb
+  vars:
+    backup_dir: "/tmp/{{ ansible_hostname }}-{{ ansible_date_time.date }}/"
+
+  tasks:
+  - name: Copy /etc/haproxy contents
+    synchronize:
+      src: "/etc/haproxy"
+      dest: "{{ backup_dir }}etc"
+      archive: yes
+    delegate_to: "{{ inventory_hostname }}"
+
+  - name: Copy /etc/sysconfig contents
+    synchronize:
+      src: "{{ item }}"
+      dest: "{{ backup_dir }}etc"
+      archive: yes
+    with_fileglob:
+      - "/etc/sysconfig/iptables"
+      - "/etc/sysconfig/haproxy"
+    delegate_to: "{{ inventory_hostname }}"
+
+
+# Archive the backup location on each host and send to masters[0]
+- name:
+  hosts: all
+  vars:
+    backup_dir: "/tmp/{{ ansible_hostname }}-{{ ansible_date_time.date }}/"
+    backup_arch: "/tmp/{{ ansible_hostname }}-{{ ansible_date_time.date }}.tar.gz"
+    backup_collection_dir: "/tmp/openshift-backup-{{ ansible_date_time.date }}/"
+
+  tasks:
+  - name: Compress backup directory
+    archive:
+      path: "{{ backup_dir }}"
+      dest: "{{ backup_arch }}"
+      remove: no
+
+  - name: Remove backup directory after archive creation
+    file:
+      path: "{{ backup_dir }}"
+      state: absent
+
+  - name: Move all host config backups to first Master
+    fetch:
+      src: "{{ backup_arch }}"
+      dest: "{{ backup_collection_dir }}"
+      flat: yes
+
+  - name: Remove backup archive from each host after copied to masters[0]
+    file:
+      path: "{{ backup_arch }}"
+      state: absent

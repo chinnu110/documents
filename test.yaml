@@ -1,0 +1,20 @@
+---
+- name: Backup OpenShift Master Hosts
+  hosts: masters[0]
+  tasks:
+  - name: Retrieve list of installed packages
+    yum:
+      list=installed
+    register: yum_packages
+
+  - debug: var=item
+    with_items: "{{yum_packages|json_query(jsonquery)}}"
+    vars:
+      jsonquery: "results[?name=='tar']"
+
+
+#  - name: Copy using inline content
+#    copy:
+#      content: "{{ yum_list['results'] }}"
+#      dest: "/tmp/packages.txt"
+#

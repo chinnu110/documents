@@ -1,0 +1,79 @@
+#realm leave
+#echo "6kIuSrJW6H)h4xo)" |realm join hobbylobby.corp -U svc_RHEL_AD_Test --computer-ou="OU=RHEL,OU=Test,DC=HobbyLobby,DC=Corp"
+#wget -O /etc/sssd/sssd.conf "http://10.100.37.104/ks/files/sssd.conf"
+#chmod 600 /etc/sssd/sssd.conf
+#HOST_NAME=`hostname -f`
+#sed -i "s/NXHOSTNAME.hobbylobby.corp/${HOST_NAME}/" /etc/sssd/sssd.conf
+#systemctl restart sssd
+
+---
+- name: re-register to domain
+  hosts: all
+  vars:
+    svc_acct: svc_RHEL_AD
+    svc_pass: "6kIuSrJW6H)h4xo)"
+    computer_ou: "OU=RHEL,OU=Test,DC=HobbyLobby,DC=Corp"
+    dns_server: 10.100.1.79
+
+  tasks:
+  - name: Check if AD lookup works
+    shell: id "{{ svc_acct }}"
+    register: domain_lookup
+    failed_when: domain_lookup.rc == 2
+    changed_when: domain_lookup.rc != 0
+
+  - name: Check DNS resolution
+    shell: host {{ ansible_facts['fqdn'] }} {{ dns_server }}
+    register: dns_lookup
+    failed_when: dns_lookup.rc == 2
+    changed_when: dns_lookup.rc != 0
+
+  - name: Display status, join OK
+    debug:
+      msg: "{{ ansible_facts['fqdn'] }} - AD lookup OK, DNS lookup OK."
+    when: domain_lookup.rc == 0 and
+          dns_lookup.rc == 0
+
+  - name: Display status, AD lookup failed
+    debug:
+      msg: "{{ ansible_facts['fqdn'] }} - AD account lookup failed."
+    when: domain_lookup.rc != 0
+
+  - name: Display status, DNS lookup failed
+    debug:
+      msg: "{{ ansible_facts['fqdn'] }} - DNS lookup failed."
+    when: dns_lookup.rc != 0
+
+
+  - name: Leave Domain
+    shell: realm leave
+    when: domain_lookup.rc != 0 or
+          dns_lookup.rc != 0
+
+  - name: Join Domain
+    shell: echo "{{ svc_pass }}" |realm join hobbylobby.corp -U "{{ svc_acct }}" --computer-ou="{{ computer_ou }}"
+    when: domain_lookup.rc != 0 or
+          dns_lookup.rc != 0
+
+  - name: Download template sssd.conf
+    get_url:
+      url: http://10.100.37.104/ks/files/sssd.conf
+      dest: /etc/sssd/sssd.conf
+      mode: '0600'
+    when: domain_lookup.rc != 0 or
+          dns_lookup.rc != 0
+
+  - name: Correct hostname
+    replace:
+      path: /etc/sssd/sssd.conf
+      regexp: 'NXHOSTNAME.hobbylobby.corp'
+      replace: "{{ ansible_facts['nodename'] }}"
+    when: domain_lookup.rc != 0 or
+          dns_lookup.rc != 0
+
+  - name: Make sure a service is running
+    systemd:
+      state: started
+      name: sssd
+    when: domain_lookup.rc != 0 or
+          dns_lookup.rc != 0

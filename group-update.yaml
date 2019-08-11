@@ -1,0 +1,60 @@
+---
+- name: Update LDAP URL with all groups in whitelist
+  hosts: masters[0]
+  vars:
+    ad_whitelist: "/opt/openshift/active_directory_whitelist"
+    ad_sync_config: "/opt/openshift/active_directory_config.yaml"
+
+  tasks:
+  - name: Make group list string
+    shell: echo -n "(|";for grp in `cat {{ ad_whitelist }}`; do echo -n "(memberOf=${grp})";done;echo ")"
+    register: grp_list
+    changed_when: grp_list.rc != 0
+
+  - name: Correct group string
+    set_fact:
+      group_list: "{{ grp_list.stdout | regex_replace('Hobby\\)\\(memberOf=Lobby','Hobby Lobby') }}"
+
+  - name: Sync groups into OpenShift
+    shell: "oc adm groups sync --whitelist={{ ad_whitelist }} --sync-config={{ ad_sync_config }} --confirm=true"
+    changed_when: grp_list.rc != 0
+
+#  - name: Display group list
+#    debug:
+#      msg: "{{ group_list }}"
+
+- name: Update LDAP URL in master-config file on all masters
+  hosts: masters
+  vars:
+    master_config: "/etc/origin/master/master-config.yaml"
+#    master_config: "/tmp/master-config.yaml"
+    ldap_dc: "hptdc03.HobbyLobby.corp:389"
+
+  tasks:
+  - name: Carry over group_list from master one
+    set_fact:
+      group_list: "{{ hostvars[groups['masters'][0]]['group_list'] }}"
+
+#  - name: Display group list
+#    debug:
+#      msg: "{{ group_list }}"
+
+  - name: Replace LDAP URL
+    replace:
+      path: "{{ master_config }}"
+      after: "      kind: LDAPPasswordIdentityProvider"
+      regexp: "^      url: ldap.*"
+      replace: "      url: ldap://{{ ldap_dc }}/DC=HobbyLobby,DC=corp?sAMAccountName?sub?(&(objectCategory=Person)(sAMAccountName=*){{ group_list }})"
+    register: url_updated
+
+- name: Restart master services, only from master one
+  hosts: masters[0]
+
+  tasks:
+  - name: Restart Master API services
+    shell: master-restart api api
+    when: url_updated.changed
+
+  - name: Restart Master controller services
+    shell: master-restart controller controller
+    when: url_updated.changed

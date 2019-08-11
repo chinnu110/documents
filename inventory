@@ -1,0 +1,89 @@
+[OSEv3:children]
+masters
+nodes
+etcd
+lb
+
+# Set variables common for all OSEv3 hosts
+[OSEv3:vars]
+ansible_ssh_user=root
+openshift_deployment_type=openshift-enterprise
+oreg_url=hlsatellite02.hobbylobby.corp:5000/hl-redhat-openshift3_ose-${component}:${version}
+osm_etcd_image=hlsatellite02.hobbylobby.corp:5000/hl-redhat-rhel7_etcd:3.2.22
+openshift_examples_modify_imagestreams=true
+openshift_cluster_monitoring_operator_install=false
+openshift_docker_insecure_registries=hlsatellite02.hobbylobby.corp:5000
+openshift_docker_blocked_registries=registry.access.redhat.com,docker.io,registry.redhat.io
+openshift_docker_additional_registries=hlsatellite02.hobbylobby.corp:5000
+openshift_console_install=true
+openshift_console_hostname=console.apps-snd.hobbylobby.corp
+openshift_console_cert=/opt/openshift/OSconsole.pem
+openshift_console_key=/opt/openshift/OSconsole.key
+openshift_master_api_port=443
+openshift_master_console_port=443
+
+openshift_master_overwrite_named_certificates=true
+openshift_hosted_router_certificate={"certfile": "/opt/openshift/Star.apps-snd.hobbylobby.corp.pem", "keyfile": "/opt/openshift/Star.apps-snd.hobbylobby.corp.key", "cafile": "/opt/openshift/HL-CA-CHAIN.pem"} 
+
+# Registry Certificates
+openshift_hosted_registry_routehost=registry.apps-snd.hobbylobby.corp 
+openshift_hosted_registry_routecertificates={"certfile": "/opt/openshift/snd-registry_cert.pem", "keyfile": "/opt/openshift/snd-registry_cert.key", "cafile": "/opt/openshift/HL-CA-CHAIN.pem"} 
+openshift_hosted_registry_routetermination=reencrypt 
+
+# Advanced Auditing
+openshift_master_audit_config={"enabled": true, "auditFilePath": "/var/lib/origin/audit-ocp.log", "maximumFileRetentionDays": 14, "maximumFileSizeMegabytes": 500, "maximumRetainedFiles": 5, "policyFile": "/etc/origin/master/adv-audit.yaml", "logFormat":"json"}
+openshift_master_audit_policyfile="/opt/openshift/adv-audit.yaml"
+ 
+# HA Settings
+openshift_rolling_restart_mode=system
+openshift_master_cluster_method=native
+openshift_master_cluster_hostname=sndoscluster.hobbylobby.corp
+openshift_master_cluster_public_hostname=sndoscluster.hobbylobby.corp
+openshift_master_default_subdomain=apps-snd.hobbylobby.corp
+
+#Identity_providers
+openshift_master_identity_providers=[{'name': 'HobbyCorp', 'challenge': 'true', 'login': 'true', 'kind': 'LDAPPasswordIdentityProvider', 'attributes': {'id': ['distinguishedName'], 'email': ['mail'], 'name': ['cn'], 'preferredUsername': ['sAMAccountName']}, 'bindDN': 'svc_RHEL_OS_LDAP@HobbyLobby.corp', 'bindPassword': 's#Angg&%1hgpJ^8!', 'ca': '', 'insecure': 'true', 'url': 'ldap://hptdc03.HobbyLobby.corp:389/DC=HobbyLobby,DC=corp?sAMAccountName?sub?(&(objectCategory=Person)(sAMAccountName=*)(memberOf=CN=sg_OS_dev_infra_admin,OU=Security,OU=Groups,OU=Corporate,OU=Hobby Lobby,DC=HobbyLobby,DC=corp))'}]
+
+##### Need to configure persistent storage for registry #### Not NFS ####
+openshift_hosted_registry_storage_kind=nfs
+openshift_hosted_registry_storage_access_modes=['ReadWriteMany']
+openshift_hosted_registry_storage_host=hlisi01nfs.hobbylobby.corp
+openshift_hosted_registry_storage_nfs_directory=/SND_Openshift
+openshift_hosted_registry_storage_volume_name=pv-registry01
+openshift_hosted_registry_storage_volume_size=50Gi
+
+# prometheus configure (future)
+openshift_cluster_monitoring_operator_install=true
+#openshift_cluster_monitoring_operator_prometheus_storage_enabled=True
+#openshift_cluster_monitoring_operator_prometheus_storage_capacity=100Gi
+#openshift_cluster_monitoring_operator_alertmanager_storage_enabled=True
+#openshift_cluster_monitoring_operator_alertmanager_storage_capacity=10Gi
+
+
+##### Need decission from network team
+osm_cluster_network_cidr=172.16.5.0/25
+openshift_portal_net=172.16.5.128/25
+osm_host_subnet_length=4
+
+[masters]
+Sndosmaster01.hobbylobby.corp
+Sndosmaster02.hobbylobby.corp
+Sndosmaster03.hobbylobby.corp
+
+[etcd]
+Sndosinfra01.hobbylobby.corp
+Sndosinfra02.hobbylobby.corp
+Sndosinfra03.hobbylobby.corp
+
+[nodes]
+Sndospod01.hobbylobby.corp openshift_node_group_name='node-config-compute'
+Sndospod02.hobbylobby.corp openshift_node_group_name='node-config-compute'
+Sndosmaster01.hobbylobby.corp openshift_node_group_name='node-config-master'
+Sndosmaster02.hobbylobby.corp openshift_node_group_name='node-config-master'
+Sndosmaster03.hobbylobby.corp openshift_node_group_name='node-config-master'
+Sndosinfra01.hobbylobby.corp openshift_node_group_name='node-config-infra'
+Sndosinfra02.hobbylobby.corp openshift_node_group_name='node-config-infra'
+Sndosinfra03.hobbylobby.corp openshift_node_group_name='node-config-infra'
+
+[lb]
+Sndoslb01.hobbylobby.corp
